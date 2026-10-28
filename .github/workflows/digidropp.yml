@@ -1,0 +1,74 @@
+# Builds the app on every push to main (and on pull requests into it) and uploads it to Digidropp.
+# Managed by Digidropp: https://digidropp.online
+name: Digidropp build
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: digidropp-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create the env file from Digidropp settings
+        run: |
+          node <<'JS'
+          const fs = require("fs");
+          const path = require("path");
+          const lines = [];
+          for (const [name, value] of Object.entries(JSON.parse(process.env.DIGIDROPP_SECRETS || "{}"))) {
+            if (name.startsWith("DDENV_")) lines.push(name.slice(6) + "=" + value);
+            else if (name.startsWith("DDENVX_")) lines.push(Buffer.from(name.slice(7), "hex").toString() + "=" + value);
+          }
+          if (lines.length) {
+            const file = process.env.DIGIDROPP_ENV_PATH || ".env";
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            fs.writeFileSync(file, lines.sort().join("\n") + "\n", { mode: 0o600 });
+            console.log("Created " + file + " with " + lines.length + " variables");
+          }
+          JS
+        env:
+          DIGIDROPP_SECRETS: ${{ toJSON(secrets) }}
+          DIGIDROPP_ENV_PATH: ${{ secrets.DIGIDROPP_ENV_PATH }}
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Use the project's stable signing key
+        run: |
+          mkdir -p ~/.android
+          echo "$DIGIDROPP_DEBUG_KEYSTORE" | base64 -d > ~/.android/debug.keystore
+        env:
+          DIGIDROPP_DEBUG_KEYSTORE: ${{ secrets.DIGIDROPP_DEBUG_KEYSTORE }}
+      - run: flutter pub get
+      - name: Build APK
+        run: flutter build apk --release
+      - name: Upload to Digidropp
+        uses: digidropp/upload-action@v1
+        with:
+          api-token: ${{ secrets.DIGIDROPP_TOKEN }}
+          api-url: "https://api.digidropp.online/api"
+          file: "build/app/outputs/flutter-apk/app-release.apk"
+      - name: Delete the env file
+        if: always()
+        run: rm -f "${DIGIDROPP_ENV_PATH:-.env}"
+        env:
+          DIGIDROPP_ENV_PATH: ${{ secrets.DIGIDROPP_ENV_PATH }}
