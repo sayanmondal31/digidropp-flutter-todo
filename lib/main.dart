@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+// 
 // Settings come from .env (bundled as an asset). It isn't committed: Digidropp builds create it from the
 // variables set on the Automatic builds page, and local runs use a copy of .env.example.
 class AppConfig {
